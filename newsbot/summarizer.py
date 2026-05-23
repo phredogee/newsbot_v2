@@ -1,6 +1,6 @@
 import os
-from openai import OpenAI
-from openai import RateLimitError, APIError, AuthenticationError
+
+from anthropic import Anthropic, APIError, AuthenticationError, RateLimitError
 
 
 def generate_local_briefing(df, max_articles=8):
@@ -16,9 +16,7 @@ def generate_local_briefing(df, max_articles=8):
 
     top_topic_text = ", ".join(sorted(set(top_topics))[:5]) or "No major topics detected"
 
-    lines = [
-        "### Top Signals",
-    ]
+    lines = ["### Top Signals"]
 
     for _, row in articles.iterrows():
         title = row.get("title", "Untitled article")
@@ -43,20 +41,17 @@ def generate_local_briefing(df, max_articles=8):
 
 
 def generate_ai_briefing(df, max_articles=8):
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = os.getenv("ANTHROPIC_API_KEY")
 
     if not api_key:
-        return generate_local_briefing(df, max_articles)
+        return generate_local_briefing(df, max_articles) + "\n\n_ANTHROPIC_API_KEY is not set. Showing local fallback briefing._"
 
-    try:
-        client = OpenAI(api_key=api_key)
+    articles = df.head(max_articles)
 
-        articles = df.head(max_articles)
+    article_text = ""
 
-        article_text = ""
-
-        for _, row in articles.iterrows():
-            article_text += f"""
+    for _, row in articles.iterrows():
+        article_text += f"""
 Title: {row.get("title", "")}
 Source: {row.get("source", "")}
 Summary: {row.get("summary", "")}
@@ -64,31 +59,43 @@ Sentiment: {row.get("sentiment", "")}
 Topics: {row.get("topics", "")}
 """
 
-        prompt = f"""
-Create a concise executive briefing from these analyzed news items.
+    prompt = f"""
+You are NewsBot 2.0, an AI news intelligence assistant.
 
-Format:
-1. Top Signals
-2. Why It Matters
-3. Risks or Concerns
-4. Recommended Follow-Up
+Create a concise executive briefing from the following analyzed news items.
+
+Format the response in Markdown using these sections:
+
+### Top Signals
+### Why It Matters
+### Risks or Concerns
+### Recommended Follow-Up
 
 News items:
 {article_text}
 """
 
-        response = client.responses.create(
-            model="gpt-4.1-mini",
-            input=prompt,
+    try:
+        client = Anthropic(api_key=api_key)
+
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=700,
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ],
         )
 
-        return response.output_text
+        return message.content[0].text
 
     except RateLimitError:
-        return generate_local_briefing(df, max_articles) + "\n\n_API quota unavailable, showing local fallback briefing._"
+        return generate_local_briefing(df, max_articles) + "\n\n_Claude API rate limit reached. Showing local fallback briefing._"
 
     except AuthenticationError:
-        return generate_local_briefing(df, max_articles) + "\n\n_API key issue detected, showing local fallback briefing._"
+        return generate_local_briefing(df, max_articles) + "\n\n_Claude API key issue detected. Showing local fallback briefing._"
 
     except APIError as error:
-        return generate_local_briefing(df, max_articles) + f"\n\n_OpenAI API error: {error}. Showing local fallback briefing._"
+        return generate_local_briefing(df, max_articles) + f"\n\n_Claude API error: {error}. Showing local fallback briefing._"
