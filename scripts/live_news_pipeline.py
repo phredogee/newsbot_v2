@@ -1,35 +1,43 @@
 import pandas as pd
-import feedparser
 
 from app.pipeline import analyze_article
+from newsbot.feeds import fetch_rss_news
 
-rss_url = "https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml"
 
-feed = feedparser.parse(rss_url)
+def main():
+    articles = fetch_rss_news()
 
-results = []
+    analyzed_rows = []
 
-for entry in feed.entries[:10]:
+    for article in articles:
+        title = article.get("title", "")
+        summary = article.get("summary", "")
+        source = article.get("source", "Unknown source")
+        url = article.get("url", article.get("link", ""))
 
-    text = f"""
-    {entry.title}
+        text_for_analysis = f"{title}. {summary}"
 
-    {entry.summary}
-    """
+        analysis = analyze_article(text_for_analysis)
 
-    analysis = analyze_article(text)
+        analyzed_rows.append(
+            {
+                "title": title,
+                "source": source,
+                "summary": summary,
+                "url": url,
+                "sentiment": analysis.get("sentiment", {}).get("label", "Unknown"),
+                "polarity": analysis.get("sentiment", {}).get("polarity", 0),
+                "subjectivity": analysis.get("sentiment", {}).get("subjectivity", 0),
+                "topics": ", ".join(analysis.get("topics", [])),
+            }
+        )
 
-    results.append({
-        "title": entry.title,
-        "link": entry.link,
-        "summary": entry.summary,
-        "sentiment": analysis["sentiment"]["label"],
-        "polarity": analysis["sentiment"]["polarity"],
-        "topics": ", ".join(analysis["topics"]),
-    })
+    df = pd.DataFrame(analyzed_rows)
 
-df = pd.DataFrame(results)
+    df.to_csv("data/live_news_analysis.csv", index=False)
 
-df.to_csv("data/live_news_analysis.csv", index=False)
+    print(df[["title", "sentiment", "topics", "url"]].head(10))
 
-print(df[["title", "sentiment", "topics"]])
+
+if __name__ == "__main__":
+    main()

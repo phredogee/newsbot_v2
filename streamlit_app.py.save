@@ -1,0 +1,158 @@
+from pathlib import Path
+from datetime import datetime
+
+import pandas as pd
+import streamlit as st
+
+
+st.set_page_config(
+    page_title="NewsBot v2",
+    page_icon="📰",
+    layout="wide",
+)
+
+
+DATA_PATH = Path("data/live_news_analysis.csv")
+
+
+@st.cache_data
+def load_data(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        return pd.DataFrame()
+
+    df = pd.read_csv(path)
+
+    # Clean missing values for safer display
+    df = df.fillna("")   return df
+
+
+df = load_data(DATA_PATH)
+
+
+st.title("NewsBot v2")
+st.caption("AI-assisted news monitoring, summarization, and signal detection dashboard.")
+
+
+# -----------------------------
+# Metrics
+# -----------------------------
+articles_scanned = len(df)
+
+high_signal_items = 0
+if not df.empty and "sentiment" in df.columns:
+    high_signal_items = len(df[df["sentiment"].isin(["Positive", "Negative"])])
+
+sources_active = 0
+if not df.empty and "source" in df.columns:
+    sources_active = df["source"].nunique()
+
+last_updated = "Today" if DATA_PATH.exists() else "No data yet"
+
+
+col1, col2, col3, col4 = st.columns(4)
+
+col1.metric("Articles Scanned", articles_scanned)
+col2.metric("High-Signal Items", high_signal_items)
+col3.metric("Sources Active", sources_active)
+col4.metric("Last Updated", last_updated)
+
+
+st.divider()
+
+
+# -----------------------------
+# Controls
+# -----------------------------
+st.sidebar.header("Controls")
+
+topic_filter = "All"
+sentiment_filter = "All"
+
+if not df.empty and "topics" in df.columns:
+    all_topics = sorted(
+        set(
+            topic.strip()
+            for topics in df["topics"].astype(str)
+            for topic in topics.split(",")
+            if topic.strip()
+        )
+    )
+
+    topic_filter = st.sidebar.selectbox(
+        "Topic Focus",
+        ["All"] + all_topics,
+    )
+
+if not df.empty and "sentiment" in df.columns:
+    sentiments = sorted(df["sentiment"].astype(str).unique())
+
+    sentiment_filter = st.sidebar.selectbox(
+        "Sentiment",
+        ["All"] + sentiments,
+    )
+
+
+filtered_df = df.copy()
+
+if topic_filter != "All" and "topics" in filtered_df.columns:
+    filtered_df = filtered_df[
+        filtered_df["topics"].astype(str).str.contains(topic_filter, case=False, na=False)
+    ]
+
+if sentiment_filter != "All" and "sentiment" in filtered_df.columns:
+    filtered_df = filtered_df[filtered_df["sentiment"] == sentiment_filter]
+
+
+# -----------------------------
+# Main Display
+# -----------------------------
+st.subheader("Top News Signals")
+
+if df.empty:
+    st.warning("No live news data found. Run this first: python -m scripts.live_news_pipeline")
+else:
+    for _, row in filtered_df.head(10).iterrows():
+        title = row.get("title", "Untitled article")
+        source = row.get("source", "Unknown source")
+        summary = row.get("summary", "")
+        sentiment = row.get("sentiment", "Unknown")
+        topics = row.get("topics", "")
+
+        with st.container():
+            st.markdown(f"### {title}")
+            st.caption(f"{source} · Sentiment: {sentiment}")
+
+            if summary:
+                st.write(summary)
+
+            if topics:
+                st.markdown(f"**Topics:** {topics}")
+
+            st.divider()
+
+
+# -----------------------------
+# Data Table
+# -----------------------------
+st.subheader("Live News Analysis Table")
+
+if not df.empty:
+    st.dataframe(filtered_df, use_container_width=True)
+
+    csv = filtered_df.to_csv(index=False).encode("utf-8")
+
+    st.download_button(
+        label="Download filtered CSV",
+        data=csv,
+        file_name="newsbot_live_news_analysis.csv",
+        mime="text/csv",
+    )
+
+
+# -----------------------------
+# Footer
+# -----------------------------
+st.caption(
+    f"Designed for quick review, signal detection, and AI-assisted summarization. "
+    f"Data source: {DATA_PATH}"
+)
